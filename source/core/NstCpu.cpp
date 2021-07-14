@@ -23,6 +23,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 
 #include <cstring>
+#include <cstdlib>
 #include "NstCpu.hpp"
 #include "NstHook.hpp"
 #include "NstState.hpp"
@@ -166,6 +167,11 @@ namespace Nes
 			Reset( false, true );
 		}
 
+		void Cpu::SetRamPowerState(uint powerstate)
+		{
+			ram.powerstate = powerstate;
+		}
+
 		void Cpu::Reset(bool hard)
 		{
 			Reset( true, hard );
@@ -211,10 +217,10 @@ namespace Nes
 
 			if (on)
 			{
-				map( 0x0000, 0x07FF ).Set( &ram, &Cpu::Ram::Peek_Ram_0, &Cpu::Ram::Poke_Ram_0 );
-				map( 0x0800, 0x0FFF ).Set( &ram, &Cpu::Ram::Peek_Ram_1, &Cpu::Ram::Poke_Ram_1 );
-				map( 0x1000, 0x17FF ).Set( &ram, &Cpu::Ram::Peek_Ram_2, &Cpu::Ram::Poke_Ram_2 );
-				map( 0x1800, 0x1FFF ).Set( &ram, &Cpu::Ram::Peek_Ram_3, &Cpu::Ram::Poke_Ram_3 );
+				map( 0x0000, 0x07FF ).Set( &ram, &Ram::Peek_Ram_0, &Ram::Poke_Ram_0 );
+				map( 0x0800, 0x0FFF ).Set( &ram, &Ram::Peek_Ram_1, &Ram::Poke_Ram_1 );
+				map( 0x1000, 0x17FF ).Set( &ram, &Ram::Peek_Ram_2, &Ram::Poke_Ram_2 );
+				map( 0x1800, 0x1FFF ).Set( &ram, &Ram::Peek_Ram_3, &Ram::Poke_Ram_3 );
 				map( 0x2000, 0xFFFF ).Set( this, &Cpu::Peek_Nop,        &Cpu::Poke_Nop        );
 				map( 0xFFFC         ).Set( this, &Cpu::Peek_Jam_1,      &Cpu::Poke_Nop        );
 				map( 0xFFFD         ).Set( this, &Cpu::Peek_Jam_2,      &Cpu::Poke_Nop        );
@@ -237,7 +243,15 @@ namespace Nes
 			pc = map.Peek16( RESET_VECTOR );
 
 			if (hard)
-				cycles.count = cycles.clock[RESET_CYCLES-1];
+			{
+				Poke(0x4017, 0x00);
+				cycles.count = cycles.clock[RESET_CYCLES] + cycles.clock[0];
+			}
+			else
+			{
+				Poke(0x4017, apu.GetCtrl());
+				cycles.count = cycles.clock[RESET_CYCLES] + cycles.clock[0];
+			}
 		}
 
 		void Cpu::SetModel(const CpuModel m)
@@ -297,9 +311,9 @@ namespace Nes
 		{
 			return
 			(
-				model == CPU_RP2A03 ? clock * qword( CPU_RP2A03_CC * CLK_NTSC_DIV ) / CLK_NTSC :
-				model == CPU_RP2A07 ? clock * qword( CPU_RP2A07_CC * CLK_PAL_DIV  ) / CLK_PAL  :
-                                      clock * qword( CPU_DENDY_CC  * CLK_PAL_DIV  ) / CLK_PAL
+				model == CPU_RP2A03 ? clock * qaword( CPU_RP2A03_CC * CLK_NTSC_DIV ) / CLK_NTSC :
+				model == CPU_RP2A07 ? clock * qaword( CPU_RP2A07_CC * CLK_PAL_DIV  ) / CLK_PAL  :
+                                      clock * qaword( CPU_DENDY_CC  * CLK_PAL_DIV  ) / CLK_PAL
 			);
 		}
 
@@ -764,18 +778,10 @@ namespace Nes
 
 		void Cpu::Ram::Reset(const CpuModel model)
 		{
-			if (model == CPU_DENDY)
-			{
-				std::memset( mem, 0x00, sizeof(mem) );
-			}
-			else
-			{
-				std::memset( mem, 0xFF, sizeof(mem) );
-
-				mem[0x08] = 0xF7;
-				mem[0x09] = 0xEF;
-				mem[0x0A] = 0xDF;
-				mem[0x0F] = 0xBF;
+			switch (powerstate) {
+				case 1: std::memset( mem, 0xFF, sizeof(mem) ); break;
+				case 2: std::memset( mem, byte(std::rand()), sizeof(mem) ); break;
+				default: std::memset( mem, 0x00, sizeof(mem) ); break;
 			}
 		}
 
@@ -1720,18 +1726,42 @@ namespace Nes
 			return address;
 		}
 
-		NST_SINGLE_CALL uint Cpu::Shx(uint address)
+		NST_SINGLE_CALL void Cpu::Shx(uint address)
 		{
-			address = x & ((address >> 8) + 1);
+			uint newaddress = (address + y);
+			uint data = x & ((address >> 8) + 1);
+			Peek((address & 0xFF00) | (newaddress & 0x00FF)); // Dummy read
+
+			if ((address ^ newaddress) & 0x100)
+			{
+				address = (newaddress & (x << 8)) | (newaddress & 0x00FF);
+			}
+			else
+			{
+				address = newaddress;
+			}
+
 			NotifyOp("SHX",1UL << 15);
-			return address;
+			StoreMem(address, data);
 		}
 
-		NST_SINGLE_CALL uint Cpu::Shy(uint address)
+		NST_SINGLE_CALL void Cpu::Shy(uint address)
 		{
-			address = y & ((address >> 8) + 1);
+			uint newaddress = (address + x);
+			uint data = y & ((address >> 8) + 1);
+			Peek((address & 0xFF00) | (newaddress & 0x00FF)); // Dummy read
+
+			if ((address ^ newaddress) & 0x100)
+			{
+				address = (newaddress & (y << 8)) | (newaddress & 0x00FF);
+			}
+			else
+			{
+				address = newaddress;
+			}
+
 			NotifyOp("SHY",1UL << 16);
-			return address;
+			StoreMem(address, data);
 		}
 
 		NST_NO_INLINE uint Cpu::Slo(uint data)
@@ -2080,6 +2110,15 @@ namespace Nes
 			Store##addr_( dst, instr_(dst) );         \
 		}
 
+		// Unofficial Opcodes SHX/SHY are edge cases
+		#define NES_I_W_U(instr_,addr_,hex_)          \
+                                                      \
+		void Cpu::op##hex_()                          \
+		{                                             \
+			const uint dst = addr_##_W();             \
+			instr_(dst);                              \
+		}
+
 		#define NES_IP_C_(instr_,ops_,ticks_,hex_)    \
                                                       \
 		void Cpu::op##hex_()                          \
@@ -2337,8 +2376,8 @@ namespace Nes
 		NES_I_W_A( Sha, AbsY,     0x9F )
 		NES_I_W_A( Sha, IndY,     0x93 )
 		NES_I_W_A( Shs, AbsY,     0x9B )
-		NES_I_W_A( Shx, AbsY,     0x9E )
-		NES_I_W_A( Shy, AbsX,     0x9C )
+		NES_I_W_U( Shx, Abs,      0x9E ) // Edge case: AbsY done internally
+		NES_I_W_U( Shy, Abs,      0x9C ) // Edge case: AbsX done internally
 		NES_IRW__( Slo, Zpg,      0x07 )
 		NES_IRW__( Slo, ZpgX,     0x17 )
 		NES_IRW__( Slo, Abs,      0x0F )

@@ -80,7 +80,8 @@ namespace Nes
 						Map( 0x6000U, &Vrc2::Peek_6000, &Vrc2::Poke_6000 );
 
 					Map( 0x8000U, 0x8FFFU, PRG_SWAP_8K_0 );
-					Map( 0x9000U, 0x9FFFU, NMT_SWAP_VH01 );
+					//Map( 0x9000U, 0x9FFFU, NMT_SWAP_VH01 );
+					Map( 0x9000U, 0x9FFFU, NMT_SWAP_HV );
 					Map( 0xA000U, 0xAFFFU, PRG_SWAP_8K_1 );
 
 					for (uint i=0xB000, a=9-prgLineA, b=8-prgLineB; i < 0xF000; ++i)
@@ -152,7 +153,12 @@ namespace Nes
 				void Vrc2::SwapChr(uint address,uint subBank) const
 				{
 					ppu.Update();
-					chr.SwapBank<SIZE_1K>( address, (chr.GetBank<SIZE_1K>(address) & 0xF0U >> OFFSET) | ((subBank >> chrShift & 0xF) << OFFSET) );
+
+					chr.SwapBank<SIZE_1K>( address, chrShift ? OFFSET ?
+						(chr.GetBank<SIZE_1K>(address) & 0x07U) | ((subBank & 0xFU) << 3) :
+						(chr.GetBank<SIZE_1K>(address) & 0xF8U) | ((subBank >> 1) & 0x7U) :
+						(chr.GetBank<SIZE_1K>(address) & 0xF0U >> OFFSET) | ((subBank & 0xFU) << OFFSET)
+					);
 				}
 
 				NES_POKE_D(Vrc2,B000) { SwapChr<0>( 0x0000, data ); }

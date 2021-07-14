@@ -192,7 +192,9 @@ namespace Nes
 				static const char title[] = "Ines: ";
 
 				if (setup.version)
-					log << title << "version 2.0 detected" NST_LINEBREAK;
+				{
+					log << title << "NES 2.0 (extended iNES)" NST_LINEBREAK;
+				}
 
 				if (result == RESULT_WARN_BAD_FILE_HEADER)
 					log << title << "warning, unknown or invalid header data!" NST_LINEBREAK;
@@ -231,6 +233,7 @@ namespace Nes
 				{
 					if (setup.chrRam)
 					{
+						profile.board.chrRam = setup.chrRam / SIZE_1K;
 						log << title
 							<< (setup.chrRam % SIZE_1K ? setup.chrRam : setup.chrRam / SIZE_1K)
 							<< (setup.chrRam % SIZE_1K ? " bytes" : "k")
@@ -335,7 +338,7 @@ namespace Nes
 				log << NST_LINEBREAK;
 
 				if (setup.version && setup.subMapper)
-					log << title << "unknown sub-mapper " << setup.subMapper << " set" NST_LINEBREAK;
+					log << title << "submapper " << setup.subMapper << " set" NST_LINEBREAK;
 
 				TrainerSetup trainerSetup;
 
@@ -405,6 +408,7 @@ namespace Nes
 				}
 
 				profile.board.mapper = setup.mapper;
+				profile.board.subMapper = setup.subMapper;
 				profileEx.wramAuto = (setup.version == 0 && profile.board.wram.empty());
 
 				switch (setup.mirroring)
@@ -422,6 +426,12 @@ namespace Nes
 					case Header::MIRRORING_FOURSCREEN:
 
 						profileEx.nmt = ProfileEx::NMT_FOURSCREEN;
+						break;
+
+					case Header::MIRRORING_SINGLESCREEN:
+					case Header::MIRRORING_CONTROLLED:
+
+						default:
 						break;
 				}
 
@@ -664,7 +674,7 @@ namespace Nes
 
 			if (setup.version)
 			{
-				setup.mapper |= uint(header[8]) << 8 & 0x100;
+				setup.mapper |= uint(header[8]) << 8 & 0x300;
 				setup.subMapper = header[8] >> 4;
 			}
 
@@ -849,7 +859,7 @@ namespace Nes
 
 				header[11] |= i;
 
-				for (i=0, data=setup.chrNvRam >> 7; data; data >>= 1, ++i);
+				for (i=0, data=setup.chrNvRam >> 7; data; data >>= 1, ++i)
 				{
 					if (i > 0xF)
 						return RESULT_ERR_INVALID_PARAM;

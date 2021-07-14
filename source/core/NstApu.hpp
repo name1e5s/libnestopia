@@ -50,7 +50,6 @@ namespace Nes
 		public:
 
 			explicit Apu(Cpu&);
-
 			void  Reset(bool);
 			void  PowerOff();
 			void  ClearBuffers();
@@ -65,8 +64,10 @@ namespace Nes
 			Result SetSpeed(uint);
 			Result SetVolume(uint,uint);
 			uint   GetVolume(uint) const;
+			uint   GetCtrl();
 			void   Mute(bool);
 			void   SetAutoTranspose(bool);
+			void   SetGenie(bool);
 			void   EnableStereo(bool);
 
 			void SaveState(State::Saver&,dword) const;
@@ -90,6 +91,7 @@ namespace Nes
 				uint  GetCpuClockDivider() const;
 				Cycle GetCpuClock(uint=1) const;
 				bool  IsMuted() const;
+				bool  IsGenie() const;
 
 			public:
 
@@ -225,6 +227,8 @@ namespace Nes
 
 					void Reset();
 					Sample Apply(Sample);
+					void LoadState(State::Loader&);
+					void SaveState(State::Saver&,dword) const;
 
 				private:
 
@@ -434,7 +438,7 @@ namespace Nes
 				Triangle();
 
 				void Reset();
-				void UpdateSettings(uint,dword,uint,CpuModel);
+				void UpdateSettings(uint,dword,uint);
 				void LoadState(State::Loader&);
 				void SaveState(State::Saver&,dword) const;
 
@@ -457,7 +461,7 @@ namespace Nes
 				enum
 				{
 					MIN_FRQ                   = 2 + 1,
-					STEP_CHECK                = 0x00, // >= 0x1F is technically correct but will produce clicks/pops
+					STEP_CHECK                = 0x1F,
 					REG0_LINEAR_COUNTER_LOAD  = 0x7F,
 					REG0_LINEAR_COUNTER_START = 0x80,
 					REG2_WAVE_LENGTH_LOW      = 0x00FF,
@@ -599,6 +603,7 @@ namespace Nes
 				byte speed;
 				bool muted;
 				bool transpose;
+				bool genie;
 				bool stereo;
 				bool audible;
 				byte volumes[MAX_CHANNELS];
@@ -639,6 +644,11 @@ namespace Nes
 			bool IsAutoTransposing() const
 			{
 				return settings.transpose;
+			}
+
+			bool IsGenie() const
+			{
+				return settings.genie;
 			}
 
 			bool InStereo() const

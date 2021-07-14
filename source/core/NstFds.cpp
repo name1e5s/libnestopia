@@ -162,12 +162,13 @@ namespace Nes
 
 		Fds::Fds(Context& context)
 		:
-		Image   (DISK),
-		disks   (context.stream),
-		adapter (context.cpu,disks.sides),
-		cpu     (context.cpu),
-		ppu     (context.ppu),
-		sound   (context.apu)
+		Image         (DISK),
+		disks         (context.stream),
+		adapter       (context.cpu,disks.sides),
+		cpu           (context.cpu),
+		ppu           (context.ppu),
+		sound         (context.apu),
+		favoredSystem (context.favoredSystem)
 		{
 			if (!bios.Available())
 				throw RESULT_ERR_MISSING_BIOS;
@@ -223,7 +224,7 @@ namespace Nes
 			cpu.Map( 0x4090         ).Set( this, &Fds::Peek_4090, &Fds::Poke_Nop  );
 			cpu.Map( 0x4092         ).Set( this, &Fds::Peek_4092, &Fds::Poke_Nop  );
 
-			cpu.Map( 0x6000, 0xDFFF ).Set( &ram, &Fds::Ram::Peek_Ram, &Fds::Ram::Poke_Ram );
+			cpu.Map( 0x6000, 0xDFFF ).Set( &ram, &Ram::Peek_Ram, &Ram::Poke_Ram );
 			cpu.Map( 0xE000, 0xFFFF ).Set( &bios, &Bios::Peek_Rom, &Bios::Poke_Nop );
 		}
 
@@ -269,6 +270,16 @@ namespace Nes
 					*ppu = PPU_RP2C02;
 
 				return SYSTEM_FAMICOM;
+			}
+			else if ((region == REGION_PAL) && (favoredSystem == FAVORED_DENDY))
+			{
+				if (cpu)
+					*cpu = CPU_DENDY;
+
+				if (ppu)
+					*ppu = PPU_DENDY;
+
+				return SYSTEM_DENDY;
 			}
 			else
 			{
@@ -362,7 +373,7 @@ namespace Nes
 					{
 						State::Loader::Data<4> data( state );
 
-						io.ctrl = data[0];
+						io.ctrl = adapter.ctrl = data[0];
 						io.port = data[1];
 						break;
 					}
@@ -539,7 +550,13 @@ namespace Nes
 
 		NES_POKE_D(Fds,4023)
 		{
-			io.ctrl = data;
+			io.ctrl = adapter.ctrl = data;
+
+			if (!(io.ctrl & Io::CTRL0_DISK_ENABLED))
+			{
+				cpu.ClearIRQ();
+				adapter.DisableIRQ();
+			}
 		}
 
 		NES_POKE_D(Fds,4026)
@@ -772,19 +789,25 @@ namespace Nes
 		#pragma optimize("", on)
 		#endif
 
-		void Fds::Unit::Timer::Advance(uint& timer)
+		bool Fds::Unit::Timer::Clock()
 		{
-			timer |= STATUS_PENDING_IRQ;
+			bool retval = false;
 
-			if (ctrl & CTRL_REPEAT)
-				count = latch;
-			else
-				ctrl &= ~uint(CTRL_ENABLED);
-		}
+			if (ctrl & CTRL_ENABLED)
+			{
+				if (count == 0)
+				{
+					retval = true;
+					count = latch;
 
-		NST_SINGLE_CALL bool Fds::Unit::Timer::Clock()
-		{
-			return !(ctrl & CTRL_ENABLED) || !count || --count;
+					if (!(ctrl & CTRL_REPEAT))
+						ctrl &= ~uint(CTRL_ENABLED);
+				}
+				else
+					count--;
+			}
+
+			return retval;
 		}
 
 		#ifdef NST_MSVC_OPTIMIZE
@@ -960,7 +983,7 @@ namespace Nes
 				count = 0;
 				status |= uint(STATUS_UNREADY);
 			}
-			else if (!(reg & CTRL_STOP | count) && io)
+			else if (!((reg & CTRL_STOP) | count) && io)
 			{
 				count = CLK_MOTOR;
 				headPos = 0;
@@ -1189,11 +1212,15 @@ namespace Nes
 
 		ibool Fds::Unit::Clock()
 		{
-			return
-			(
-				(timer.Clock() ? 0 : (timer.Advance(status), 1)) |
-				(drive.Clock() ? 0 : drive.Advance(status))
-			);
+			bool retval = false;
+
+			if (timer.Clock())
+			{
+				status |= STATUS_PENDING_IRQ;
+				retval = true;
+			}
+
+			return (retval | (drive.Clock() ? 0 : drive.Advance(status)));
 		}
 
 		#ifdef NST_MSVC_OPTIMIZE
@@ -1202,6 +1229,12 @@ namespace Nes
 
 		Fds::Adapter::Adapter(Cpu& c,const Disks::Sides& s)
 		: Timer::M2<Unit>(c,s) {}
+
+		void Fds::Adapter::DisableIRQ()
+		{
+			unit.status &= ~uint(Unit::STATUS_PENDING_IRQ);
+			unit.timer.ctrl &= ~uint(Unit::Timer::CTRL_ENABLED);
+		}
 
 		void Fds::Adapter::Reset(Cpu& cpu,byte* const io,bool protect)
 		{
@@ -1282,7 +1315,7 @@ namespace Nes
 					State::Loader::Data<16> data( state );
 
 					unit.drive.ctrl = data[0];
-					unit.drive.status = data[1] & (Unit::Drive::STATUS_EJECTED|Unit::Drive::STATUS_UNREADY|Unit::Drive::STATUS_PROTECTED) | OPEN_BUS;
+					unit.drive.status = (data[1] & (Unit::Drive::STATUS_EJECTED|Unit::Drive::STATUS_UNREADY|Unit::Drive::STATUS_PROTECTED)) | OPEN_BUS;
 					unit.drive.in = data[2] | (data[15] << 8 & 0x100);
 					unit.drive.out = data[3];
 					unit.drive.headPos = data[4] | data[5] << 8;
@@ -1366,12 +1399,17 @@ namespace Nes
 		{
 			Update();
 
+			if (!(ctrl & Io::CTRL0_DISK_ENABLED))
+				return;
+
 			unit.timer.ctrl = data;
 			unit.timer.count = unit.timer.latch;
 			unit.status &= Unit::STATUS_TRANSFERED;
 
-			if (!unit.status)
-				ClearIRQ();
+			if (data & Unit::Timer::CTRL_ENABLED)
+				return;
+
+			ClearIRQ();
 		}
 
 		NES_POKE_D(Fds::Adapter,4024)
@@ -2040,7 +2078,7 @@ namespace Nes
 			if (active)
 			{
 				const dword pos = wave.pos;
-				wave.pos = (wave.pos + dword(qword(GetModulation()) * wave.frame / wave.clock) + Wave::SIZE * wave.rate) % (Wave::SIZE * wave.rate);
+				wave.pos = (wave.pos + dword(qaword(GetModulation()) * wave.frame / wave.clock) + Wave::SIZE * wave.rate) % (Wave::SIZE * wave.rate);
 
 				if (wave.pos < pos)
 					wave.volume = envelopes.units[VOLUME].Output();

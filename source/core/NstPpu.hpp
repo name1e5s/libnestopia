@@ -176,6 +176,7 @@ namespace Nes
 
 			NST_FORCE_INLINE void UpdateAddressLine(uint);
 			NST_FORCE_INLINE void UpdateScrollAddressLine();
+			NST_FORCE_INLINE void UpdateVramAddress();
 
 			NST_FORCE_INLINE void OpenName();
 			NST_FORCE_INLINE void FetchName();
@@ -310,6 +311,7 @@ namespace Nes
 				Video::Screen::Pixel* pixels;
 				uint burstPhase;
 				word palette[Palette::SIZE];
+				uint bgColor;
 			};
 
 			struct Oam
@@ -412,7 +414,10 @@ namespace Nes
 			Chr chr;
 			Nmt nmt;
 			int scanline;
+			int scanline_sleep;
+		public:
 			Output output;
+		private:
 			PpuModel model;
 			Hook hActiveHook;
 			Hook hBlankHook;

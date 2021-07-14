@@ -805,6 +805,16 @@ namespace Nes
 					* Mapper ID.
 					*/
 					uint mapper;
+
+					/**
+					* Submapper ID.
+					*/
+					uint subMapper;
+
+					/**
+					* CHR RAM Size.
+					*/
+					uint chrRam;
 				};
 
 				/**
